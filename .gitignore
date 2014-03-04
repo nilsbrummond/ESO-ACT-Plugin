@@ -1,8 +1,8 @@
 # ACT Build Env - Not included
 #
-NeverwinterACT/
+ElderScrollsOnlineACT/
 Properties/
-NeverwinterParsing.*
+ElderScrollsOnlineParsing.*
 *.resx
 
 #################
