@@ -1,7 +1,9 @@
 ESO-ACT-Plugin
 ==============
 
-An ACT (Advanced Combat Tracker) plugin for reading combat log files from ESO (Elder Scrolls Online).  ACT is available from http://advancedcombattracker.com and ESO is available from http://http://elderscrollsonline.com.
+An ACT (Advanced Combat Tracker) plugin for reading combat log files from ESO (Elder Scrolls Online).  ACT is available from http://advancedcombattracker.com and ESO is available from http://elderscrollsonline.com.
+
+This plugin is based on the ESO Addon at https://github.com/nilsbrummond/ESO-ACT-CombatLogging.
 
 Status
 ======
