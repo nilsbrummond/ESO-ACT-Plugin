@@ -16,11 +16,12 @@ using System.Net;
 [assembly: AssemblyTitle("Elder Scrolls Online Parsing Plugin")]
 [assembly: AssemblyDescription("A basic parser that reads combat logs in ESO.")]
 [assembly: AssemblyCopyright("Nils Brummond (nils.brummond@gmail.com) 2014")]
-[assembly: AssemblyVersion("0.0.0.1")]
+[assembly: AssemblyVersion("0.0.0.2")]
 
 
 namespace ESOParsing_Plugin
 {
+
     public class ESO_Parser : ACTPluginBase, IActPluginV1
     {
         private Label lblStatus = null;
@@ -29,6 +30,22 @@ namespace ESOParsing_Plugin
         // NOTE: The values of "Unknown" and "UNKNOWN" short-circuit the ally determination code.  Must use one of these two names.
         //       Information from EQAditu.
         internal static string unk = "UNKNOWN", unkAbility = "Unknown Ability";
+
+        private ReflectionTracker reflectionTracker = new ReflectionTracker();
+
+        private CombatEvent damageShielded = null;
+
+        public enum SwingTypeEnum
+        {
+            Melee = 1,
+            NonMelee = 2,
+            Healing = 3,
+            // PowerDrain = 10,
+            MagickaHealing = 13,
+            // Threat = 16,
+            StaminaHealing = 17,
+            CureDispel = 20,
+        }
 
         private enum LogEntryTypes
         {
@@ -53,7 +70,7 @@ namespace ESOParsing_Plugin
             ActGlobals.oFormActMain.LogPathHasCharName = false;
 
             // A windows file system filter to search updated log files with.
-            ActGlobals.oFormActMain.LogFileFilter = "ChatLog.log";
+            ActGlobals.oFormActMain.LogFileFilter = "*.log";
 
             // If all log files are in a single folder, this isn't an issue. If log files are split into different folders,
             // enter the parent folder name here. This way ACT will monitor that base folder and all sub-folders for updated files.
@@ -146,7 +163,7 @@ namespace ESOParsing_Plugin
 			EncounterData.ExportVariables.Add("MAXHEALWARD", new EncounterData.TextExportFormatter("MAXHEALWARD", ActGlobals.ActLocalization.LocalizationStrings["exportFormattingLabel-MAXHEALWARD"].DisplayedText, ActGlobals.ActLocalization.LocalizationStrings["exportFormattingDesc-MAXHEALWARD"].DisplayedText, (Data, SelectiveAllies, Extra) => { return EncounterFormatSwitch(Data, SelectiveAllies, "MAXHEALWARD", Extra); }));
 			EncounterData.ExportVariables.Add("damagetaken", new EncounterData.TextExportFormatter("damagetaken", ActGlobals.ActLocalization.LocalizationStrings["exportFormattingLabel-damagetaken"].DisplayedText, ActGlobals.ActLocalization.LocalizationStrings["exportFormattingDesc-damagetaken"].DisplayedText, (Data, SelectiveAllies, Extra) => { return EncounterFormatSwitch(Data, SelectiveAllies, "damagetaken", Extra); }));
 			EncounterData.ExportVariables.Add("healstaken", new EncounterData.TextExportFormatter("healstaken", ActGlobals.ActLocalization.LocalizationStrings["exportFormattingLabel-healstaken"].DisplayedText, ActGlobals.ActLocalization.LocalizationStrings["exportFormattingDesc-healstaken"].DisplayedText, (Data, SelectiveAllies, Extra) => { return EncounterFormatSwitch(Data, SelectiveAllies, "healstaken", Extra); }));
-			EncounterData.ExportVariables.Add("powerdrain", new EncounterData.TextExportFormatter("powerdrain", ActGlobals.ActLocalization.LocalizationStrings["exportFormattingLabel-powerdrain"].DisplayedText, ActGlobals.ActLocalization.LocalizationStrings["exportFormattingDesc-powerdrain"].DisplayedText, (Data, SelectiveAllies, Extra) => { return EncounterFormatSwitch(Data, SelectiveAllies, "powerdrain", Extra); }));
+//			EncounterData.ExportVariables.Add("powerdrain", new EncounterData.TextExportFormatter("powerdrain", ActGlobals.ActLocalization.LocalizationStrings["exportFormattingLabel-powerdrain"].DisplayedText, ActGlobals.ActLocalization.LocalizationStrings["exportFormattingDesc-powerdrain"].DisplayedText, (Data, SelectiveAllies, Extra) => { return EncounterFormatSwitch(Data, SelectiveAllies, "powerdrain", Extra); }));
 			EncounterData.ExportVariables.Add("powerheal", new EncounterData.TextExportFormatter("powerheal", ActGlobals.ActLocalization.LocalizationStrings["exportFormattingLabel-powerheal"].DisplayedText, ActGlobals.ActLocalization.LocalizationStrings["exportFormattingDesc-powerheal"].DisplayedText, (Data, SelectiveAllies, Extra) => { return EncounterFormatSwitch(Data, SelectiveAllies, "powerheal", Extra); }));
 			EncounterData.ExportVariables.Add("kills", new EncounterData.TextExportFormatter("kills", ActGlobals.ActLocalization.LocalizationStrings["exportFormattingLabel-kills"].DisplayedText, ActGlobals.ActLocalization.LocalizationStrings["exportFormattingDesc-kills"].DisplayedText, (Data, SelectiveAllies, Extra) => { return EncounterFormatSwitch(Data, SelectiveAllies, "kills", Extra); }));
 			EncounterData.ExportVariables.Add("deaths", new EncounterData.TextExportFormatter("deaths", ActGlobals.ActLocalization.LocalizationStrings["exportFormattingLabel-deaths"].DisplayedText, ActGlobals.ActLocalization.LocalizationStrings["exportFormattingDesc-deaths"].DisplayedText, (Data, SelectiveAllies, Extra) => { return EncounterFormatSwitch(Data, SelectiveAllies, "deaths", Extra); }));
@@ -166,7 +183,7 @@ namespace ESOParsing_Plugin
 			CombatantData.ColumnDefs.Add("CritHeals", new CombatantData.ColumnDef("CritHeals", false, "INT", "CritHeals", (Data) => { return Data.CritHeals.ToString(GetIntCommas()); }, (Data) => { return Data.CritHeals.ToString(); }, (Left, Right) => { return Left.CritHeals.CompareTo(Right.CritHeals); }));
 			CombatantData.ColumnDefs.Add("Heals", new CombatantData.ColumnDef("Heals", false, "INT", "Heals", (Data) => { return Data.Heals.ToString(GetIntCommas()); }, (Data) => { return Data.Heals.ToString(); }, (Left, Right) => { return Left.Heals.CompareTo(Right.Heals); }));
 			CombatantData.ColumnDefs.Add("Cures", new CombatantData.ColumnDef("Cures", false, "INT", "CureDispels", (Data) => { return Data.CureDispels.ToString(GetIntCommas()); }, (Data) => { return Data.CureDispels.ToString(); }, (Left, Right) => { return Left.CureDispels.CompareTo(Right.CureDispels); }));
-			CombatantData.ColumnDefs.Add("PowerDrain", new CombatantData.ColumnDef("PowerDrain", true, "BIGINT", "PowerDrain", (Data) => { return Data.PowerDamage.ToString(GetIntCommas()); }, (Data) => { return Data.PowerDamage.ToString(); }, (Left, Right) => { return Left.PowerDamage.CompareTo(Right.PowerDamage); }));
+//			CombatantData.ColumnDefs.Add("PowerDrain", new CombatantData.ColumnDef("PowerDrain", true, "BIGINT", "PowerDrain", (Data) => { return Data.PowerDamage.ToString(GetIntCommas()); }, (Data) => { return Data.PowerDamage.ToString(); }, (Left, Right) => { return Left.PowerDamage.CompareTo(Right.PowerDamage); }));
 			CombatantData.ColumnDefs.Add("PowerReplenish", new CombatantData.ColumnDef("PowerReplenish", false, "BIGINT", "PowerReplenish", (Data) => { return Data.PowerReplenish.ToString(GetIntCommas()); }, (Data) => { return Data.PowerReplenish.ToString(); }, (Left, Right) => { return Left.PowerReplenish.CompareTo(Right.PowerReplenish); }));
 			CombatantData.ColumnDefs.Add("DPS", new CombatantData.ColumnDef("DPS", false, "DOUBLE", "DPS", (Data) => { return Data.DPS.ToString(GetFloatCommas()); }, (Data) => { return Data.DPS.ToString(usCulture); }, (Left, Right) => { return Left.DPS.CompareTo(Right.DPS); }));
 			CombatantData.ColumnDefs.Add("EncDPS", new CombatantData.ColumnDef("EncDPS", true, "DOUBLE", "EncDPS", (Data) => { return Data.EncDPS.ToString(GetFloatCommas()); }, (Data) => { return Data.EncDPS.ToString(usCulture); }, (Left, Right) => { return Left.Damage.CompareTo(Right.Damage); }));
@@ -190,7 +207,7 @@ namespace ESOParsing_Plugin
 			CombatantData.ColumnDefs["Damage%"].GetCellForeColor = (Data) => { return Color.DarkRed; };
 			CombatantData.ColumnDefs["Healed"].GetCellForeColor = (Data) => { return Color.DarkBlue; };
 			CombatantData.ColumnDefs["Healed%"].GetCellForeColor = (Data) => { return Color.DarkBlue; };
-			CombatantData.ColumnDefs["PowerDrain"].GetCellForeColor = (Data) => { return Color.DarkMagenta; };
+//			CombatantData.ColumnDefs["PowerDrain"].GetCellForeColor = (Data) => { return Color.DarkMagenta; };
 			CombatantData.ColumnDefs["DPS"].GetCellForeColor = (Data) => { return Color.DarkRed; };
 			CombatantData.ColumnDefs["EncDPS"].GetCellForeColor = (Data) => { return Color.DarkRed; };
 			CombatantData.ColumnDefs["EncHPS"].GetCellForeColor = (Data) => { return Color.DarkBlue; };
@@ -199,53 +216,59 @@ namespace ESOParsing_Plugin
 			CombatantData.OutgoingDamageTypeDataObjects = new Dictionary<string, CombatantData.DamageTypeDef>
 		{
 //			{"Auto-Attack (Out)", new CombatantData.DamageTypeDef("Auto-Attack (Out)", -1, Color.DarkGoldenrod)},
-			{"Skill/Ability (Out)", new CombatantData.DamageTypeDef("Skill/Ability (Out)", -1, Color.DarkOrange)},
-			{"Outgoing Damage", new CombatantData.DamageTypeDef("Outgoing Damage", 0, Color.Orange)},
+//			{"Skill/Ability (Out)", new CombatantData.DamageTypeDef("Skill/Ability (Out)", -1, Color.DarkOrange)},
+			{"Damage (Out)", new CombatantData.DamageTypeDef("Damage (Out)", 0, Color.Orange)},
 			{"Healed (Out)", new CombatantData.DamageTypeDef("Healed (Out)", 1, Color.Blue)},
-			{"Power Drain (Out)", new CombatantData.DamageTypeDef("Power Drain (Out)", -1, Color.Purple)},
-			{"Power Replenish (Out)", new CombatantData.DamageTypeDef("Power Replenish (Out)", 1, Color.Violet)},
+//			{"Magicka Drain (Out)", new CombatantData.DamageTypeDef("Power Drain (Out)", -1, Color.Purple)},
+			{"Magicka Replenish (Out)", new CombatantData.DamageTypeDef("Power Replenish (Out)", 1, Color.Violet)},
+//            {"Stamina Drain (Out)", new CombatantData.DamageTypeDef("Power Drain (Out)", -1, Color.Purple)},
+			{"Stamina Replenish (Out)", new CombatantData.DamageTypeDef("Power Replenish (Out)", 1, Color.Violet)},
 			{"Cure/Dispel (Out)", new CombatantData.DamageTypeDef("Cure/Dispel (Out)", 0, Color.Wheat)},
 //			{"Threat (Out)", new CombatantData.DamageTypeDef("Threat (Out)", -1, Color.Yellow)},
 			{"All Outgoing (Ref)", new CombatantData.DamageTypeDef("All Outgoing (Ref)", 0, Color.Black)}
 		};
 			CombatantData.IncomingDamageTypeDataObjects = new Dictionary<string, CombatantData.DamageTypeDef>
 		{
-			{"Incoming Damage", new CombatantData.DamageTypeDef("Incoming Damage", -1, Color.Red)},
+			{"Damage (Inc)", new CombatantData.DamageTypeDef("Damage (Inc)", -1, Color.Red)},
 			{"Healed (Inc)",new CombatantData.DamageTypeDef("Healed (Inc)", 1, Color.LimeGreen)},
-			{"Power Drain (Inc)",new CombatantData.DamageTypeDef("Power Drain (Inc)", -1, Color.Magenta)},
-			{"Power Replenish (Inc)",new CombatantData.DamageTypeDef("Power Replenish (Inc)", 1, Color.MediumPurple)},
+//			{"Magicka Drain (Inc)",new CombatantData.DamageTypeDef("Power Drain (Inc)", -1, Color.Magenta)},
+			{"Magicka Replenish (Inc)",new CombatantData.DamageTypeDef("Power Replenish (Inc)", 1, Color.MediumPurple)},
+//          {"Stamina Drain (Inc)",new CombatantData.DamageTypeDef("Power Drain (Inc)", -1, Color.Magenta)},
+			{"Stamina Replenish (Inc)",new CombatantData.DamageTypeDef("Power Replenish (Inc)", 1, Color.MediumPurple)},
 			{"Cure/Dispel (Inc)", new CombatantData.DamageTypeDef("Cure/Dispel (Inc)", 0, Color.Wheat)},
 //			{"Threat (Inc)",new CombatantData.DamageTypeDef("Threat (Inc)", -1, Color.Yellow)},
 			{"All Incoming (Ref)",new CombatantData.DamageTypeDef("All Incoming (Ref)", 0, Color.Black)}
 		};
 			CombatantData.SwingTypeToDamageTypeDataLinksOutgoing = new SortedDictionary<int, List<string>>
-		{ 
-//			{1, new List<string> { "Auto-Attack (Out)", "Outgoing Damage" } },
-			{2, new List<string> { "Skill/Ability (Out)", "Outgoing Damage" } },
+		{
+			{1, new List<string> { "Damage (Out)" } },
+			{2, new List<string> { "Damage (Out)" } },
 			{3, new List<string> { "Healed (Out)" } },
-			{10, new List<string> { "Power Drain (Out)" } },
-			{13, new List<string> { "Power Replenish (Out)" } },
+//			{10, new List<string> { "Magicka Drain (Out)" } },
+			{13, new List<string> { "Magicka Replenish (Out)" } },
+            {17, new List<string> { "Stamina Replenish (Out)" } },
 			{20, new List<string> { "Cure/Dispel (Out)" } },
 //			{16, new List<string> { "Threat (Out)" } }
 		};
 			CombatantData.SwingTypeToDamageTypeDataLinksIncoming = new SortedDictionary<int, List<string>>
-		{ 
-//			{1, new List<string> { "Incoming Damage" } },
-			{2, new List<string> { "Incoming Damage" } },
+		{
+			{1, new List<string> { "Damage (Inc)" } },
+			{2, new List<string> { "Damage (Inc)" } },
 			{3, new List<string> { "Healed (Inc)" } },
-			{10, new List<string> { "Power Drain (Inc)" } },
-			{13, new List<string> { "Power Replenish (Inc)" } },
+//			{10, new List<string> { "Magicka Drain (Inc)" } },
+			{13, new List<string> { "Magicka Replenish (Inc)" } },
+            {17, new List<string> { "Stamina Replenish (Inc)" } },
 			{20, new List<string> { "Cure/Dispel (Inc)" } },
 //			{16, new List<string> { "Threat (Inc)" } }
 		};
 
-			CombatantData.DamageSwingTypes = new List<int> { /* 1, */ 2 };
+			CombatantData.DamageSwingTypes = new List<int> { 1, 2 };
 			CombatantData.HealingSwingTypes = new List<int> { 3 };
 
-//			CombatantData.DamageTypeDataNonSkillDamage = "Auto-Attack (Out)";
-			CombatantData.DamageTypeDataOutgoingDamage = "Outgoing Damage";
+			CombatantData.DamageTypeDataNonSkillDamage = "Damage (Out)";
+			CombatantData.DamageTypeDataOutgoingDamage = "Damage (Out)";
 			CombatantData.DamageTypeDataOutgoingHealing = "Healed (Out)";
-			CombatantData.DamageTypeDataIncomingDamage = "Incoming Damage";
+			CombatantData.DamageTypeDataIncomingDamage = "Damage (Inc)";
 			CombatantData.DamageTypeDataIncomingHealing = "Healed (Inc)";
 
 			CombatantData.ExportVariables.Clear();
@@ -292,7 +315,7 @@ namespace ESOParsing_Plugin
 			CombatantData.ExportVariables.Add("MAXHEALWARD", new CombatantData.TextExportFormatter("MAXHEALWARD", ActGlobals.ActLocalization.LocalizationStrings["exportFormattingLabel-MAXHEALWARD"].DisplayedText, ActGlobals.ActLocalization.LocalizationStrings["exportFormattingDesc-MAXHEALWARD"].DisplayedText, (Data, Extra) => { return CombatantFormatSwitch(Data, "MAXHEALWARD", Extra); }));
 			CombatantData.ExportVariables.Add("damagetaken", new CombatantData.TextExportFormatter("damagetaken", ActGlobals.ActLocalization.LocalizationStrings["exportFormattingLabel-damagetaken"].DisplayedText, ActGlobals.ActLocalization.LocalizationStrings["exportFormattingDesc-damagetaken"].DisplayedText, (Data, Extra) => { return CombatantFormatSwitch(Data, "damagetaken", Extra); }));
 			CombatantData.ExportVariables.Add("healstaken", new CombatantData.TextExportFormatter("healstaken", ActGlobals.ActLocalization.LocalizationStrings["exportFormattingLabel-healstaken"].DisplayedText, ActGlobals.ActLocalization.LocalizationStrings["exportFormattingDesc-healstaken"].DisplayedText, (Data, Extra) => { return CombatantFormatSwitch(Data, "healstaken", Extra); }));
-			CombatantData.ExportVariables.Add("powerdrain", new CombatantData.TextExportFormatter("powerdrain", ActGlobals.ActLocalization.LocalizationStrings["exportFormattingLabel-powerdrain"].DisplayedText, ActGlobals.ActLocalization.LocalizationStrings["exportFormattingDesc-powerdrain"].DisplayedText, (Data, Extra) => { return CombatantFormatSwitch(Data, "powerdrain", Extra); }));
+//			CombatantData.ExportVariables.Add("powerdrain", new CombatantData.TextExportFormatter("powerdrain", ActGlobals.ActLocalization.LocalizationStrings["exportFormattingLabel-powerdrain"].DisplayedText, ActGlobals.ActLocalization.LocalizationStrings["exportFormattingDesc-powerdrain"].DisplayedText, (Data, Extra) => { return CombatantFormatSwitch(Data, "powerdrain", Extra); }));
 			CombatantData.ExportVariables.Add("powerheal", new CombatantData.TextExportFormatter("powerheal", ActGlobals.ActLocalization.LocalizationStrings["exportFormattingLabel-powerheal"].DisplayedText, ActGlobals.ActLocalization.LocalizationStrings["exportFormattingDesc-powerheal"].DisplayedText, (Data, Extra) => { return CombatantFormatSwitch(Data, "powerheal", Extra); }));
 			CombatantData.ExportVariables.Add("kills", new CombatantData.TextExportFormatter("kills", ActGlobals.ActLocalization.LocalizationStrings["exportFormattingLabel-kills"].DisplayedText, ActGlobals.ActLocalization.LocalizationStrings["exportFormattingDesc-kills"].DisplayedText, (Data, Extra) => { return CombatantFormatSwitch(Data, "kills", Extra); }));
 			CombatantData.ExportVariables.Add("deaths", new CombatantData.TextExportFormatter("deaths", ActGlobals.ActLocalization.LocalizationStrings["exportFormattingLabel-deaths"].DisplayedText, ActGlobals.ActLocalization.LocalizationStrings["exportFormattingDesc-deaths"].DisplayedText, (Data, Extra) => { return CombatantFormatSwitch(Data, "deaths", Extra); }));
@@ -382,7 +405,7 @@ namespace ESOParsing_Plugin
 
             // ESO Specific:
             MasterSwing.ColumnDefs.Add("ActionResult", new MasterSwing.ColumnDef("ActionResult", true, "VARCHAR(128)", "ActionResult", (Data) => { return GetCellDataTag(Data, "ActionResult"); }, (Data) => { return GetCellDataTag(Data, "ActionResult"); }, (Left, Right) => { return MasterSwingCompareTagStrs(Left, Right, "ActionResult"); }));
-            MasterSwing.ColumnDefs.Add("SlotType", new MasterSwing.ColumnDef("SlotType", true, "VARCHAR(64)", "SlotType", (Data) => { return GetCellDataTag(Data, "SlotType"); }, (Data) => { return GetCellDataTag(Data, "SlotType"); }, (Left, Right) => { return MasterSwingCompareTagStrs(Left, Right, "SlotType"); }));
+            MasterSwing.ColumnDefs.Add("SlotType", new MasterSwing.ColumnDef("SlotType", true, "VARCHAR(64)", "SlotType", (Data) => { return GetCellDataTag(Data, "ActionSlotType"); }, (Data) => { return GetCellDataTag(Data, "ActionSlotType"); }, (Left, Right) => { return MasterSwingCompareTagStrs(Left, Right, "ActionSlotType"); }));
             MasterSwing.ColumnDefs.Add("PowerType", new MasterSwing.ColumnDef("PowerType", true, "VARCHAR(64)", "PowerType", (Data) => { return GetCellDataTag(Data, "PowerType"); }, (Data) => { return GetCellDataTag(Data, "PowerType"); }, (Left, Right) => { return MasterSwingCompareTagStrs(Left, Right, "PowerType"); }));
 
 			foreach(KeyValuePair<string, MasterSwing.ColumnDef> pair in MasterSwing.ColumnDefs)
@@ -410,8 +433,16 @@ namespace ESOParsing_Plugin
             return l.CompareTo(r);
         }
 
+        private string CombatantNameCleaner(string name)
+        {
+            // TODO: Format player names
+            return name;
+        }
+
         #endregion ACT_Tables_Setup
 
+        /*
+        // Chatlog format
         private DateTime ParseDateTime(string FullLogLine)
         {
             // Timestamp format:
@@ -427,21 +458,46 @@ namespace ESOParsing_Plugin
 
             return ActGlobals.oFormActMain.LastKnownTime;
         }
+        */
+
+        // Beta format
+        private DateTime ParseDateTime(string FullLogLine)
+        {
+            // Timestamp format:
+            // 2014-03-02T18:53:36.755-08:00 
+
+            int i = FullLogLine.IndexOf(' ');
+
+            if (i != -1)
+            {
+                long msec = long.Parse(FullLogLine.Substring(0, i));
+
+                DateTime d = DateTime.Today;
+                d = d.AddMilliseconds(msec);
+                return d;
+            }
+
+            return ActGlobals.oFormActMain.LastKnownTime;
+        }
 
         private void OnLogFileChanged(bool IsImport, string NewLogFileName)
         {
-
+            // TODO: Sure we will need this hook soon enough
+            reflectionTracker.Clear();
+            damageShielded = null;
         }
 
         private void OnCombatEnd(bool isImport, CombatToggleEventArgs encounterInfo)
         {
-
+            // TODO: Sure we will need this hook soon enough
+            reflectionTracker.Clear();
+            damageShielded = null;
         }
 
         void OnBeforeLogLineRead(bool isImport, LogLineEventArgs logInfo)
         {
             logInfo.detectedType = Color.Gray.ToArgb();
-
+/*
             // To Short
             if (logInfo.logLine.Length < 35) return;
             
@@ -450,6 +506,20 @@ namespace ESOParsing_Plugin
 
             // Break the line down by the separater.
             string meat = logInfo.logLine.Substring(31);
+*/
+
+            // ---- BETA
+            int i = logInfo.logLine.IndexOf(' ');
+            if (i == -1) return;
+
+            // Magic '*' token
+            if (logInfo.logLine[i+1] != '*') return;
+
+            // Break the line down by the separater.
+            string meat = logInfo.logLine.Substring(i+2);
+            // ----- BETA
+
+
             string[] segments = meat.Split(':');
 
             if (segments.Length < 2)
@@ -500,16 +570,71 @@ namespace ESOParsing_Plugin
             {
                 case CombatEvent.Type.Damage:
                     logInfo.detectedType = Color.Red.ToArgb();
+
+                    if (ce.actionResult == CombatEvent.ActionResult.ACTION_RESULT_FALL_DAMAGE)
+                    {
+                        // Falling damage does not start combat.
+                        if (!ActGlobals.oFormActMain.InCombat) return;
+                    }
+
                     if (ActGlobals.oFormActMain.SetEncounter(logInfo.detectedTime, ce.sourceName, ce.targetName))
                     {
-                        LogCombatEvent(SwingTypeEnum.NonMelee, logInfo, ce);
+                        // TODO get the ability that triggers the reflect if possible..
+                        string ability = "";
+
+                        if (reflectionTracker.CheckReflected(ce, out ability))
+                        {
+                            CombatEvent new_ce = CombatEvent.Builder.Build(ce)
+                                .Ability("Reflected: " + ce.ability)
+                                .Done();
+
+                            LogCombatEvent(SwingTypeEnum.NonMelee, logInfo, new_ce, "");
+                        }
+                        else
+                        {
+                            if ( (damageShielded != null) &&
+                                 (damageShielded.targetName == ce.targetName) &&
+                                 (damageShielded.sourceName == ce.sourceName) )
+                            {
+                                int shieled = 0;
+                                int damage = 0;
+
+                                if (damageShielded.hitValue < ce.hitValue)
+                                {
+                                    damage = ce.hitValue - damageShielded.hitValue;
+                                    shieled = damageShielded.hitValue;
+                                }
+                                else
+                                {
+                                    damage = 0;
+                                    shieled = ce.hitValue;
+                                }
+
+                                CombatEvent ds_ce = CombatEvent.Builder.Build(damageShielded)
+                                    .SwapSourceTarget()
+                                    .HitValue(shieled)
+                                    .Done();
+
+                                LogCombatEvent(SwingTypeEnum.Healing, logInfo, ds_ce, ce.ability);
+                                LogCombatEvent(SwingTypeEnum.NonMelee, logInfo, ce, "Shielded: " + shieled.ToString());
+                            }
+                            else
+                            {
+                                LogCombatEvent(SwingTypeEnum.NonMelee, logInfo, ce);
+                            }
+
+                            damageShielded = null;
+                        }
                     }
                     break;
                 case CombatEvent.Type.Heal:
                     logInfo.detectedType = Color.Green.ToArgb();
                     if (ActGlobals.oFormActMain.InCombat)
                     {
-                        LogCombatEvent(SwingTypeEnum.Healing, logInfo, ce);
+                        if (ActGlobals.oFormActMain.SetEncounter(logInfo.detectedTime, ce.sourceName, ce.targetName))
+                        {
+                            LogCombatEvent(SwingTypeEnum.Healing, logInfo, ce);
+                        }
                     }
                     break;
                 case CombatEvent.Type.Death:
@@ -534,18 +659,80 @@ namespace ESOParsing_Plugin
                     }
                     break;
                 case CombatEvent.Type.Other:
-                    logInfo.detectedType = Color.Gold.ToArgb();
-                    if (ActGlobals.oFormActMain.SetEncounter(logInfo.detectedTime, ce.sourceName, ce.targetName))
+                    logInfo.detectedType = Color.Blue.ToArgb();
+
+                    switch (ce.actionResult)
                     {
-                        LogCombatEvent(SwingTypeEnum.NonMelee, logInfo, ce);
+                        case CombatEvent.ActionResult.ACTION_RESULT_POWER_ENERGIZE:
+                            
+                            logInfo.detectedType = Color.Gold.ToArgb();
+                            if (ActGlobals.oFormActMain.InCombat)
+                            {
+                                if (ActGlobals.oFormActMain.SetEncounter(logInfo.detectedTime, ce.sourceName, ce.targetName))
+                                {
+                                    // TODO: Magicka vs Stamina handling... Special case off ability name?
+                                    //       ce.powerType -> Magicka for both magicka and stamina restoring.
+                                    if (ce.ability == "Absorb Stamina")
+                                    {
+                                        // NOTE: Only statmina case handled.
+                                        LogCombatEvent(SwingTypeEnum.StaminaHealing, logInfo, ce);
+                                    }
+                                    else
+                                    {
+                                        LogCombatEvent(SwingTypeEnum.MagickaHealing, logInfo, ce);
+                                    }
+
+                                }
+                            }
+                            break;
+                             
+                        case CombatEvent.ActionResult.ACTION_RESULT_REFLECTED:
+                            logInfo.detectedType = Color.LightPink.ToArgb();
+
+                            if (!ActGlobals.oFormActMain.InCombat)
+                            {
+                                if ((ce.sourceType == ce.targetType) && (ce.sourceName == ce.targetName)) break;
+                            }
+
+                            if (ActGlobals.oFormActMain.SetEncounter(logInfo.detectedTime, ce.sourceName, ce.targetName))
+                            {
+                                reflectionTracker.AddReflected(ce);
+                            }
+                            break;
+                        case CombatEvent.ActionResult.ACTION_RESULT_BLOCKED_DAMAGE:
+                            logInfo.detectedType = Color.Red.ToArgb();
+
+                            if (ActGlobals.oFormActMain.SetEncounter(logInfo.detectedTime, ce.sourceName, ce.targetName))
+                            {
+                                // Block does 50% damage by default.
+                                LogCombatEvent(SwingTypeEnum.NonMelee, logInfo, ce, "Blocked");
+                            }
+                            break;
+                        case CombatEvent.ActionResult.ACTION_RESULT_DAMAGE_SHIELDED:
+                            logInfo.detectedType = Color.Green.ToArgb();
+
+                            // DamageShielded = The number of damage shield points used by the next Damage line
+                            // Damage = The damage hit ( need to subtract shielded damage )
+
+                            if (ActGlobals.oFormActMain.SetEncounter(logInfo.detectedTime, ce.sourceName, ce.targetName))
+                            {
+                                damageShielded = ce;
+                            }
+                            break;
                     }
+
+                    // if (ActGlobals.oFormActMain.SetEncounter(logInfo.detectedTime, ce.sourceName, ce.targetName))
+                    // {
+                    //     LogCombatEvent(SwingTypeEnum.NonMelee, logInfo, ce);
+                    // }
                     break;
             }
         }
 
+        // TODO: Determine if we need this event type...  Combat event seems to have enough.
         void ProcessEffect(LogLineEventArgs logInfo, string[] segments)
         {
-            logInfo.detectedType = Color.Blue.ToArgb();
+            // logInfo.detectedType = Color.Blue.ToArgb();
         }
 
         void LogCombatEvent(SwingTypeEnum st, LogLineEventArgs logInfo, CombatEvent ce, string special = "")
@@ -572,6 +759,47 @@ namespace ESOParsing_Plugin
 
     internal class ESOUserControl : UserControl
     {
+    }
+
+    internal class ReflectionTracker
+    {
+        public ReflectionTracker()
+        {
+        }
+
+        public void Clear()
+        {
+            reflects.Clear();
+        }
+
+        public void AddReflected(CombatEvent ce)
+        {
+            if ((ce.sourceType != ce.targetType) ||
+                 (ce.sourceName != ce.targetName))
+            {
+                reflects.Add(ce.targetName + ':' + ce.targetType + ':' + ce.ability, ce.ability);
+            }
+        }
+
+        public bool CheckReflected(CombatEvent ce, out string abilityOut)
+        {
+            abilityOut = "";
+
+            if (reflects.Count == 0) return false;
+
+            string ability = "";
+            string key = ce.sourceName + ':' + ce.sourceType + ':' + ce.ability;
+            if (reflects.TryGetValue(key, out ability))
+            {
+                reflects.Remove(key);
+                abilityOut = ability;
+                return true;
+            }
+            
+            return false;
+        }
+
+        private Dictionary<string, string> reflects = new Dictionary<string, string>();
     }
 
     internal class CombatEvent
@@ -717,8 +945,8 @@ namespace ESOParsing_Plugin
             { "DamageShielded", new ActionData(ActionResult.ACTION_RESULT_DAMAGE_SHIELDED, Type.Other, false) },
             { "Debuff", new ActionData(ActionResult.ACTION_RESULT_DEBUFF, Type.Other, false) },
             { "Defended", new ActionData(ActionResult.ACTION_RESULT_DEFENDED, Type.Other, false) },
-            { "Died", new ActionData(ActionResult.ACTION_RESULT_DIED, Type.Other, false) },
-            { "DiedXP", new ActionData(ActionResult.ACTION_RESULT_DIED_XP, Type.Other, false) },
+            { "Died", new ActionData(ActionResult.ACTION_RESULT_DIED, Type.Death, false) },
+            { "DiedXP", new ActionData(ActionResult.ACTION_RESULT_DIED_XP, Type.Death, false) },
             { "Disarmed", new ActionData(ActionResult.ACTION_RESULT_DISARMED, Type.Other, false) },
             { "Disoriented", new ActionData(ActionResult.ACTION_RESULT_DISORIENTED, Type.Other, false) },
             { "Dodged", new ActionData(ActionResult.ACTION_RESULT_DODGED, Type.Other, false) },
@@ -797,7 +1025,7 @@ namespace ESOParsing_Plugin
         {
             try
             {
-                if (segments.Length == 14)
+                if (segments.Length == 11)
                 {
                     ActionData ad;
                     if (actionResults.TryGetValue(segments[1], out ad))
@@ -805,16 +1033,16 @@ namespace ESOParsing_Plugin
                         return new CombatEvent(segments, ad);
                     }
                 }
-                else if (segments.Length > 14)
+                else if (segments.Length > 11)
                 {
                     ActionData ad;
                     if (actionResults.TryGetValue(segments[1], out ad))
                     {
-                        int mergeCount = (segments.Length - 13);
-                        string ability = segments[3];
+                        int mergeCount = (segments.Length - 11);
+                        string ability = segments[2];
                         for (int i = 0; i < mergeCount; i++)
                         {
-                            ability = ability + ':' + segments[4 + i];
+                            ability = ability + ':' + segments[3 + i];
                         }
 
                         return new CombatEvent(segments, ability, 3 + mergeCount, ad);
@@ -826,14 +1054,146 @@ namespace ESOParsing_Plugin
             return null;
         }
 
+        public class Builder
+        {
+            private Builder() {}
+
+            public static Builder Build(CombatEvent ce)
+            {
+                Builder b = new Builder();
+
+                b.result = ce.result;
+                b.ability = ce.ability;
+                b.abilitySlotType = ce.abilitySlotType;
+                b.sourceName = ce.sourceName;
+                b.sourceType = ce.sourceType;
+                b.targetName = ce.targetName;
+                b.targetType = ce.targetType;
+                b.hitValue = ce.hitValue;
+                b.powerType = ce.powerType;
+                b.damageType = ce.damageType;
+                b.critical = ce.critical;
+                b.type = ce.type;
+                b.actionResult = ce.actionResult;
+
+                return b;
+            }
+
+            public Builder Source(string name, string type)
+            {
+                sourceName = name;
+                sourceType = type;
+
+                return this;
+            }
+
+            public Builder Target(string name, string type)
+            {
+                targetName = name;
+                targetType = type;
+
+                return this;
+            }
+
+            public Builder SwapSourceTarget()
+            {
+                string tn = targetName;
+                string tt = targetType;
+
+                targetName = sourceName;
+                targetType = sourceType;
+                sourceName = tn;
+                sourceType = tt;
+
+                return this;
+            }
+
+            public Builder Ability(String ability)
+            {
+                this.ability = ability;
+                return this;
+            }
+
+            public Builder HitValue(int hitValue)
+            {
+                this.hitValue = hitValue;
+                return this;
+            }
+
+            public CombatEvent Done()
+            {
+                return new CombatEvent(
+                    result,
+                    ability,
+                    abilitySlotType,
+                    sourceName,
+                    sourceType,
+                    targetName,
+                    targetType,
+                    hitValue,
+                    powerType,
+                    damageType,
+                    critical,
+                    type,
+                    actionResult);
+            }
+
+
+            string result;
+            string ability;
+            string abilitySlotType;
+            string sourceName;
+            string sourceType;
+            string targetName;
+            string targetType;
+            int hitValue;
+            string powerType;
+            string damageType;
+
+            // Calculated
+            bool critical;
+            Type type;
+            ActionResult actionResult;
+        }
+
+        private CombatEvent(
+            string result,
+            string ability,
+            string abilitySlotType,
+            string sourceName,
+            string sourceType,
+            string targetName,
+            string targetType,
+            int hitValue,
+            string powerType,
+            string damageType,
+            bool critical,
+            Type type,
+            ActionResult actionResult)
+        {
+            this.result = result;
+            this.ability = ability;
+            this.abilitySlotType = abilitySlotType;
+            this.sourceName = sourceName;
+            this.sourceType = sourceType;
+            this.targetName = targetName;
+            this.targetType = targetType;
+            this.hitValue = hitValue;
+            this.powerType = powerType;
+            this.damageType = damageType;
+            this.critical = critical;
+            this.type = type;
+            this.actionResult = actionResult;
+        }
+
         private CombatEvent(string[] segments, ActionData ad)
         {
             int index = 1;
 
             result = segments[index++];
-            isError = bool.Parse(segments[index++]);
+            // isError = bool.Parse(segments[index++]);
             ability = segments[index++];
-            index++; // abilityGraphic
+            // index++; // abilityGraphic
             abilitySlotType = segments[index++];
             sourceName = segments[index++];
             sourceType = segments[index++];
@@ -851,7 +1211,7 @@ namespace ESOParsing_Plugin
         private CombatEvent(string[] segments, string ability, int offset, ActionData ad)
         {
             result = segments[1];
-            isError = bool.Parse(segments[2]);
+            // isError = bool.Parse(segments[2]);
 
             this.ability = ability;
 
@@ -871,7 +1231,7 @@ namespace ESOParsing_Plugin
         
         // Raw Results
         public readonly string result;
-        public readonly bool isError;
+        // public readonly bool isError;
         public readonly string ability;
         public readonly string abilitySlotType;
         public readonly string sourceName;
@@ -1351,7 +1711,7 @@ namespace ESOParsing_Plugin
             List<AttackType> allAttackTypes = new List<AttackType>();
             List<AttackType> filteredAttackTypes = new List<AttackType>();
 
-            foreach (KeyValuePair<string, AttackType> item in Data.Items["Outgoing Damage"].Items)
+            foreach (KeyValuePair<string, AttackType> item in Data.Items["Damage (Out)"].Items)
                 allAttackTypes.Add(item.Value);
             foreach (KeyValuePair<string, AttackType> item in Data.Items["Healed (Out)"].Items)
                 allAttackTypes.Add(item.Value);
