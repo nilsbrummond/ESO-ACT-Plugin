@@ -16,7 +16,13 @@ using System.Net;
 [assembly: AssemblyTitle("Elder Scrolls Online Parsing Plugin")]
 [assembly: AssemblyDescription("A basic parser that reads combat logs in ESO.")]
 [assembly: AssemblyCopyright("Nils Brummond (nils.brummond@gmail.com) 2014")]
-[assembly: AssemblyVersion("0.0.0.2")]
+[assembly: AssemblyVersion("0.0.0.3")]
+
+
+// TODO:
+// - Need stratagy for miss / avoid.
+// - Interrupts?
+// - Block aggregate stats
 
 
 namespace ESOParsing_Plugin
@@ -549,7 +555,7 @@ namespace ESOParsing_Plugin
             }
         }
 
-        void ProcessPlayer(bool isImport, LogLineEventArgs logInfo, string[] segments)
+        private void ProcessPlayer(bool isImport, LogLineEventArgs logInfo, string[] segments)
         {
             if (segments.Length < 4) return;
 
@@ -557,15 +563,42 @@ namespace ESOParsing_Plugin
 
             if (segments[1].Length > 0) ActGlobals.charName = segments[1];
 
-            if (!isImport)
+            if ((segments[2].Length > 0) && 
+                (ActGlobals.oFormActMain.CurrentZone != segments[2]))
             {
-                if (segments[2].Length > 0)
-                ActGlobals.oFormActMain.ChangeZone(segments[2]);
+                if (ActGlobals.oFormActMain.InCombat)
+                {
+                    ActGlobals.oFormActMain.EndCombat(!isImport);
+                }
+
+                if (!isImport)
+                {
+                    ActGlobals.oFormActMain.ChangeZone(segments[2]);
+                }
             }
         }
 
-        void ProcessCombat(LogLineEventArgs logInfo, CombatEvent ce)
+        private CombatEvent FixNames(CombatEvent ce)
         {
+            if ((ce.targetName.Length == 0) || (ce .sourceName.Length == 0))
+            {
+                CombatEvent.Builder b = CombatEvent.Builder.Build(ce);
+
+                if (ce.targetName.Length == 0) b.Target(unk, "None");
+                if (ce.sourceName.Length == 0) b.Source(unk, "None");
+
+                return b.Done();
+            }
+            else
+            {
+                return ce;
+            }
+        }
+
+        private void ProcessCombat(LogLineEventArgs logInfo, CombatEvent ce)
+        {
+            ce = FixNames(ce);
+
             switch (ce.type)
             {
                 case CombatEvent.Type.Damage:
@@ -575,6 +608,8 @@ namespace ESOParsing_Plugin
                     {
                         // Falling damage does not start combat.
                         if (!ActGlobals.oFormActMain.InCombat) return;
+
+                        // TODO:  Need to test falling damage.
                     }
 
                     if (ActGlobals.oFormActMain.SetEncounter(logInfo.detectedTime, ce.sourceName, ce.targetName))
@@ -631,9 +666,11 @@ namespace ESOParsing_Plugin
                 case CombatEvent.Type.MissLike:
                     logInfo.detectedType = Color.DarkRed.ToArgb();
 
-                    string special = ce.result;
-                    LogCombatEvent(SwingTypeEnum.NonMelee, logInfo, ce, special);
-
+                    if (ActGlobals.oFormActMain.SetEncounter(logInfo.detectedTime, ce.sourceName, ce.targetName))
+                    {
+                        string special = ce.result;
+                        LogCombatEvent(SwingTypeEnum.NonMelee, logInfo, ce, special);
+                    }
                     break;
                 case CombatEvent.Type.Heal:
                     logInfo.detectedType = Color.Green.ToArgb();
@@ -667,7 +704,7 @@ namespace ESOParsing_Plugin
                     if (ActGlobals.oFormActMain.SetEncounter(logInfo.detectedTime, ce.sourceName, ce.targetName))
                     {
                         MasterSwing ms =
-                            new MasterSwing((int)SwingTypeEnum.NonMelee, ce.critical, "",
+                            new MasterSwing((int)SwingTypeEnum.NonMelee, false, "",
                                 Dnum.Death, logInfo.detectedTime, ActGlobals.oFormActMain.GlobalTimeSorter, 
                                 "Killing", ce.sourceName, "Death", ce.targetName);
 
@@ -701,7 +738,6 @@ namespace ESOParsing_Plugin
                                     {
                                         LogCombatEvent(SwingTypeEnum.MagickaHealing, logInfo, ce);
                                     }
-
                                 }
                             }
                             break;
@@ -722,6 +758,8 @@ namespace ESOParsing_Plugin
                         case CombatEvent.ActionResult.ACTION_RESULT_BLOCKED_DAMAGE:
                             logInfo.detectedType = Color.Red.ToArgb();
 
+                            // TODO: possibly make this a CombatEvent.Type.Damage instead of a special case.
+                            //       Add a special field to CombatEvent?
                             if (ActGlobals.oFormActMain.SetEncounter(logInfo.detectedTime, ce.sourceName, ce.targetName))
                             {
                                 // Block does 50% damage by default.
@@ -783,6 +821,15 @@ namespace ESOParsing_Plugin
 
     internal class ReflectionTracker
     {
+        // TODO
+        // Change to a 3 state process
+        // 1) Reflected source == target - store the ability used for reflecting
+        // 2) Reflected source != target - store the attack being reflected
+        // 3) Damage all but result match reflected source != target.
+
+        // Need a multi reflect log with overlapping different reflect abilities.
+        // ie templar or DK reflect abilities + 1h-shield Defensive Posture.
+
         public ReflectionTracker()
         {
         }
@@ -797,7 +844,14 @@ namespace ESOParsing_Plugin
             if ((ce.sourceType != ce.targetType) ||
                  (ce.sourceName != ce.targetName))
             {
+                // An attack has been relfected.
                 reflects.Add(ce.targetName + ':' + ce.targetType + ':' + ce.ability, ce.ability);
+            }
+            else
+            {
+                // source == target
+                // Indicates the ability activated that will perform the reflect.  ie:
+                // *CMBT:Reflected:Defensive Posture:NormalAbility:Lodur Darkbane:Player:Lodur Darkbane:Player:0:Invalid:Generic
             }
         }
 
