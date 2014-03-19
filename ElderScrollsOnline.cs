@@ -80,7 +80,7 @@ namespace ESOParsing_Plugin
 
 
             // Setup timestamp parsing.
-            ActGlobals.oFormActMain.TimeStampLen = 30;
+            ActGlobals.oFormActMain.TimeStampLen = /* 30; */ 9;
             ActGlobals.oFormActMain.GetDateTimeFromLog = new FormActMain.DateTimeLogParser(ParseDateTime);
 
             // This Regex is only used by a quick parsing method to find the current zone name based on a file position
@@ -611,8 +611,9 @@ namespace ESOParsing_Plugin
                                 }
 
                                 CombatEvent ds_ce = CombatEvent.Builder.Build(damageShielded)
-                                    .SwapSourceTarget()
+                                    .Source(damageShielded.targetName, damageShielded.targetType)
                                     .HitValue(shieled)
+                                    .DamageType("Damage Shield")
                                     .Done();
 
                                 LogCombatEvent(SwingTypeEnum.Healing, logInfo, ds_ce, ce.ability);
@@ -627,13 +628,32 @@ namespace ESOParsing_Plugin
                         }
                     }
                     break;
+                case CombatEvent.Type.MissLike:
+                    logInfo.detectedType = Color.DarkRed.ToArgb();
+
+                    string special = ce.result;
+                    LogCombatEvent(SwingTypeEnum.NonMelee, logInfo, ce, special);
+
+                    break;
                 case CombatEvent.Type.Heal:
                     logInfo.detectedType = Color.Green.ToArgb();
                     if (ActGlobals.oFormActMain.InCombat)
                     {
                         if (ActGlobals.oFormActMain.SetEncounter(logInfo.detectedTime, ce.sourceName, ce.targetName))
                         {
-                            LogCombatEvent(SwingTypeEnum.Healing, logInfo, ce);
+                            CombatEvent heal_ce = null;
+                            if (ce.actionResult == CombatEvent.ActionResult.ACTION_RESULT_HOT_TICK)
+                            {
+                                heal_ce = CombatEvent.Builder.Build(ce).DamageType("HoT").Done();
+                            }
+                            else
+                            {
+                                CombatEvent.Builder b = CombatEvent.Builder.Build(ce).DamageType("Heal");
+                                if (ce.ability == "Mutagen") b = b.Ability("Mutagen Heal");
+                                heal_ce = b.Done();
+                            }
+
+                            LogCombatEvent(SwingTypeEnum.Healing, logInfo, heal_ce);
                         }
                     }
                     break;
@@ -904,6 +924,7 @@ namespace ESOParsing_Plugin
         public enum Type
         {
             Damage,
+            MissLike,
             Heal,
             Death,
             Other
@@ -939,8 +960,8 @@ namespace ESOParsing_Plugin
             { "CantSeeTarget", new ActionData(ActionResult.ACTION_RESULT_CANT_SEE_TARGET, Type.Other, false) },
             { "CasterDead", new ActionData(ActionResult.ACTION_RESULT_CASTER_DEAD, Type.Other, false) },
             { "Complete", new ActionData(ActionResult.ACTION_RESULT_COMPLETE, Type.Other, false) },
-            { "CriticalDamage", new ActionData(ActionResult.ACTION_RESULT_CRITICAL_DAMAGE, Type.Damage, true) },
-            { "CriticalHeal", new ActionData(ActionResult.ACTION_RESULT_CRITICAL_HEAL, Type.Heal, true) },
+            { "CriticalDamage", new ActionData(ActionResult.ACTION_RESULT_DAMAGE, Type.Damage, true) },
+            { "CriticalHeal", new ActionData(ActionResult.ACTION_RESULT_HEAL, Type.Heal, true) },
             { "Damage", new ActionData(ActionResult.ACTION_RESULT_DAMAGE, Type.Damage, false) },
             { "DamageShielded", new ActionData(ActionResult.ACTION_RESULT_DAMAGE_SHIELDED, Type.Other, false) },
             { "Debuff", new ActionData(ActionResult.ACTION_RESULT_DEBUFF, Type.Other, false) },
@@ -949,9 +970,9 @@ namespace ESOParsing_Plugin
             { "DiedXP", new ActionData(ActionResult.ACTION_RESULT_DIED_XP, Type.Death, false) },
             { "Disarmed", new ActionData(ActionResult.ACTION_RESULT_DISARMED, Type.Other, false) },
             { "Disoriented", new ActionData(ActionResult.ACTION_RESULT_DISORIENTED, Type.Other, false) },
-            { "Dodged", new ActionData(ActionResult.ACTION_RESULT_DODGED, Type.Other, false) },
+            { "Dodged", new ActionData(ActionResult.ACTION_RESULT_DODGED, Type.MissLike, false) },
             { "DotTick", new ActionData(ActionResult.ACTION_RESULT_DOT_TICK, Type.Damage, false) },
-            { "DotTickCritical", new ActionData(ActionResult.ACTION_RESULT_DOT_TICK_CRITICAL, Type.Damage, true) },
+            { "DotTickCritical", new ActionData(ActionResult.ACTION_RESULT_DOT_TICK, Type.Damage, true) },
             { "EffectFaded", new ActionData(ActionResult.ACTION_RESULT_EFFECT_FADED, Type.Other, false) },
             { "EffectGained", new ActionData(ActionResult.ACTION_RESULT_EFFECT_GAINED, Type.Other, false) },
             { "EffectGainedDuration", new ActionData(ActionResult.ACTION_RESULT_EFFECT_GAINED_DURATION, Type.Other, false) },
@@ -965,8 +986,8 @@ namespace ESOParsing_Plugin
             { "GraveyardTooClose", new ActionData(ActionResult.ACTION_RESULT_GRAVEYARD_TOO_CLOSE, Type.Other, false) },
             { "Heal", new ActionData(ActionResult.ACTION_RESULT_HEAL, Type.Heal, false) },
             { "HotTick", new ActionData(ActionResult.ACTION_RESULT_HOT_TICK, Type.Heal, false) },
-            { "HotTickCritical", new ActionData(ActionResult.ACTION_RESULT_HOT_TICK_CRITICAL, Type.Heal, true) },
-            { "Immune", new ActionData(ActionResult.ACTION_RESULT_IMMUNE, Type.Other, false) },
+            { "HotTickCritical", new ActionData(ActionResult.ACTION_RESULT_HOT_TICK, Type.Heal, true) },
+            { "Immune", new ActionData(ActionResult.ACTION_RESULT_IMMUNE, Type.MissLike, false) },
             { "InsufficientResource", new ActionData(ActionResult.ACTION_RESULT_INSUFFICIENT_RESOURCE, Type.Other, false) },
             { "Intercepted", new ActionData(ActionResult.ACTION_RESULT_INTERCEPTED, Type.Other, false) },
             { "Interrupt", new ActionData(ActionResult.ACTION_RESULT_INTERRUPT, Type.Other, false) },
@@ -978,7 +999,7 @@ namespace ESOParsing_Plugin
             { "KillingBlow", new ActionData(ActionResult.ACTION_RESULT_KILLING_BLOW, Type.Death, false) },
             { "Levitated", new ActionData(ActionResult.ACTION_RESULT_LEVITATED, Type.Other, false) },
             { "LinkedCast", new ActionData(ActionResult.ACTION_RESULT_LINKED_CAST, Type.Other, false) },
-            { "Miss", new ActionData(ActionResult.ACTION_RESULT_MISS, Type.Other, false) },
+            { "Miss", new ActionData(ActionResult.ACTION_RESULT_MISS, Type.MissLike, false) },
             { "MissingEmptySoulGem", new ActionData(ActionResult.ACTION_RESULT_MISSING_EMPTY_SOUL_GEM, Type.Other, false) },
             { "MissingFilledSoulGem", new ActionData(ActionResult.ACTION_RESULT_MISSING_FILLED_SOUL_GEM, Type.Other, false) },
             { "Mounted", new ActionData(ActionResult.ACTION_RESULT_MOUNTED, Type.Other, false) },
@@ -989,7 +1010,7 @@ namespace ESOParsing_Plugin
             { "NPCTooClose", new ActionData(ActionResult.ACTION_RESULT_NPC_TOO_CLOSE, Type.Other, false) },
             { "Offbalance", new ActionData(ActionResult.ACTION_RESULT_OFFBALANCE, Type.Other, false) },
             { "Pacified", new ActionData(ActionResult.ACTION_RESULT_PACIFIED, Type.Other, false) },
-            { "Parried", new ActionData(ActionResult.ACTION_RESULT_PARRIED, Type.Other, false) },
+            { "Parried", new ActionData(ActionResult.ACTION_RESULT_PARRIED, Type.MissLike, false) },
             { "PartialResist", new ActionData(ActionResult.ACTION_RESULT_PARTIAL_RESIST, Type.Other, false) },
             { "PowerDrain", new ActionData(ActionResult.ACTION_RESULT_POWER_DRAIN, Type.Other, false) },
             { "PowerEnergize", new ActionData(ActionResult.ACTION_RESULT_POWER_ENERGIZE, Type.Other, false) },
@@ -999,7 +1020,7 @@ namespace ESOParsing_Plugin
             { "RamAttackableTargetsAllOccupied", new ActionData(ActionResult.ACTION_RESULT_RAM_ATTACKABLE_TARGETS_ALL_OCCUPIED, Type.Other, false) },
             { "Reflected", new ActionData(ActionResult.ACTION_RESULT_REFLECTED, Type.Other, false) },
             { "Reincarnating", new ActionData(ActionResult.ACTION_RESULT_REINCARNATING, Type.Other, false) },
-            { "Resist", new ActionData(ActionResult.ACTION_RESULT_RESIST, Type.Other, false) },
+            { "Resist", new ActionData(ActionResult.ACTION_RESULT_RESIST, Type.MissLike, false) },
             { "Resurrect", new ActionData(ActionResult.ACTION_RESULT_RESURRECT, Type.Other, false) },
             { "Rooted", new ActionData(ActionResult.ACTION_RESULT_ROOTED, Type.Other, false) },
             { "SiegeLimit", new ActionData(ActionResult.ACTION_RESULT_SIEGE_LIMIT, Type.Other, false) },
@@ -1117,6 +1138,12 @@ namespace ESOParsing_Plugin
             public Builder HitValue(int hitValue)
             {
                 this.hitValue = hitValue;
+                return this;
+            }
+
+            public Builder DamageType(string damageType)
+            {
+                this.damageType = damageType;
                 return this;
             }
 
